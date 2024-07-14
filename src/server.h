@@ -3702,7 +3702,6 @@ void strlenCommand(client *c);
 void zrankCommand(client *c);
 void zrevrankCommand(client *c);
 void hsetCommand(client *c);
-void hseteCommand(client *c);
 void hpexpireCommand(client *c);
 void hexpireCommand(client *c);
 void hpexpireatCommand(client *c);
