@@ -142,6 +142,9 @@ static inline int entryIsNoValue(const dictEntry *de) {
 }
 
 /* Creates an entry without a value field. */
+/*
+ * 创建一个没有value的节点
+ */
 static inline dictEntry *createEntryNoValue(void *key, dictEntry *next) {
     dictEntryNoValue *entry = zmalloc(sizeof(*entry));
     entry->key = key;
@@ -488,7 +491,7 @@ int dictAdd(dict *d, void *key, void *val)
     dictEntry *entry = dictAddRaw(d,key,NULL);
 
     if (!entry) return DICT_ERR;
-    if (!d->type->no_value) dictSetVal(d, entry, val);
+    if (!d->type->no_value) dictSetVal(d, entry, val); // 把value设置到对应的节点上
     return DICT_OK;
 }
 
@@ -554,11 +557,13 @@ dictEntry *dictInsertAtPosition(dict *d, void *key, void *position) {
          * Insert the element in top, with the assumption that in a database
          * system it is more likely that recently added entries are accessed
          * more frequently. */
+        // 单个桶上是用的头插法
         entry = zmalloc(sizeof(*entry));
         assert(entryIsNormal(entry)); /* Check alignment of allocation */
         entry->key = key;
         entry->next = *bucket;
     }
+    // 修改头指针
     *bucket = entry;
     d->ht_used[htidx]++;
 
@@ -1609,26 +1614,28 @@ void *dictFindPositionForInsert(dict *d, const void *key, dictEntry **existing) 
     keyCmpFunc cmpFunc = dictGetKeyCmpFunc(d);
 
     for (table = 0; table <= 1; table++) {
-        // ht_table[0] 并且 在rehash 并且 遍历的是rehash
+        // ht_table[0] 并且 在rehash中 并且 是已经rehash的，直接过滤
         if (table == 0 && (long)idx < d->rehashidx) continue; 
-        idx = hash & DICTHT_SIZE_MASK(d->ht_size_exp[table]);
+        idx = hash & DICTHT_SIZE_MASK(d->ht_size_exp[table]); // 计算桶的位置
         /* Search if this slot does not already contain the given key */
         he = d->ht_table[table][idx];
         while(he) {
             void *he_key = dictGetKey(he);
             if (key == he_key || cmpFunc(d, key, he_key)) {
+                // key的地址完全是一个，或者key完全相等
+                // 此时existing就是key应该的位置
                 if (existing) *existing = he;
-                return NULL;
+                return NULL; // 返回空，说明此时找到了旧的值，不需要添加
             }
             he = dictGetNext(he);
         }
-        if (!dictIsRehashing(d)) break;
+        if (!dictIsRehashing(d)) break; // 没有rehash，不遍历ht_table[1]的数据
     }
 
     /* If we are in the process of rehashing the hash table, the bucket is
      * always returned in the context of the second (new) hash table. */
     dictEntry **bucket = &d->ht_table[dictIsRehashing(d) ? 1 : 0][idx];
-    return bucket;
+    return bucket; // 返回桶的位置
 }
 
 void dictEmpty(dict *d, void(callback)(dict*)) {
