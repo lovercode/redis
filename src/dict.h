@@ -28,23 +28,36 @@
 
 typedef struct dictEntry dictEntry; /* opaque */
 typedef struct dict dict;
-
+/*
+ * dict需要的接口，为了更好的扩展性，dict内置了一个dictType，主要是用来实现不同的dict的自己的接口
+ * 比如当value是string或者其他，有不同的对比值的方式
+ */
 typedef struct dictType {
     /* Callbacks */
+    // hash计算
     uint64_t (*hashFunction)(const void *key);
+    // key复制
     void *(*keyDup)(dict *d, const void *key);
+    // value复制
     void *(*valDup)(dict *d, const void *obj);
+    // key对比
     int (*keyCompare)(dict *d, const void *key1, const void *key2);
+    // key销毁
     void (*keyDestructor)(dict *d, void *key);
+    // value销毁
     void (*valDestructor)(dict *d, void *obj);
+    //
     int (*resizeAllowed)(size_t moreMem, double usedRatio);
     /* Invoked at the start of dict initialization/rehashing (old and new ht are already created) */
+    // rehash开始的时候回调，新的ht已经创建
     void (*rehashingStarted)(dict *d);
     /* Invoked at the end of dict initialization/rehashing of all the entries from old to new ht. Both ht still exists
      * and are cleaned up after this callback.  */
+    // rehash结束的时候回调
     void (*rehashingCompleted)(dict *d);
     /* Allow a dict to carry extra caller-defined metadata. The
      * extra memory is initialized to 0 when a dict is allocated. */
+    // 申请的扩展的用户数据
     size_t (*dictMetadataBytes)(dict *d);
 
     /* Data */
@@ -55,6 +68,7 @@ typedef struct dictType {
      * dict is a set. When this flag is set, it's not possible to access the
      * value of a dictEntry and it's also impossible to use dictSetKey(). Entry
      * metadata can also not be used. */
+    // 没有value，只保存key，提供给set这种数据结构使用
     unsigned int no_value:1;
     /* If no_value = 1 and all keys are odd (LSB=1), setting keys_are_odd = 1
      * enables one more optimization: to store a key without an allocated
@@ -94,19 +108,23 @@ typedef struct dictType {
 #define DICTHT_SIZE_MASK(exp) ((exp) == -1 ? 0 : (DICTHT_SIZE(exp))-1)
 
 struct dict {
+    // dict的接口实现
     dictType *type;
 
     dictEntry **ht_table[2];
     unsigned long ht_used[2];
-
+    // 等于-1表示没有进行rehash
     long rehashidx; /* rehashing not in progress if rehashidx == -1 */
 
     /* Keep small vars at end for optimal (minimal) struct padding */
+    // 大于0表示暂停了rehash
     unsigned pauserehash : 15; /* If >0 rehashing is paused */
 
     unsigned useStoredKeyApi : 1; /* See comment of storedHashFunction above */
     signed char ht_size_exp[2]; /* exponent of size. (size = 1<<exp) */
+    // 大于0表示禁止扩缩容
     int16_t pauseAutoResize;  /* If >0 automatic resizing is disallowed (<0 indicates coding error) */
+    // 扩展数据
     void *metadata[];
 };
 
@@ -114,6 +132,9 @@ struct dict {
  * dictAdd, dictFind, and other functions against the dictionary even while
  * iterating. Otherwise it is a non safe iterator, and only dictNext()
  * should be called while iterating. */
+/*
+ * 迭代器
+ */
 typedef struct dictIterator {
     dict *d;
     long index;
@@ -191,10 +212,10 @@ typedef enum {
 /* API */
 dict *dictCreate(dictType *type);
 void dictTypeAddMeta(dict **d, dictType *typeWithMeta);
-int dictExpand(dict *d, unsigned long size);
+int dictExpand(dict *d, unsigned long size);// 扩容
 int dictTryExpand(dict *d, unsigned long size);
-int dictShrink(dict *d, unsigned long size);
-int dictAdd(dict *d, void *key, void *val);
+int dictShrink(dict *d, unsigned long size);// 缩容
+int dictAdd(dict *d, void *key, void *val); // add数据
 dictEntry *dictAddRaw(dict *d, void *key, dictEntry **existing);
 void *dictFindPositionForInsert(dict *d, const void *key, dictEntry **existing);
 dictEntry *dictInsertAtPosition(dict *d, void *key, void *position);

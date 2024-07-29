@@ -604,6 +604,12 @@ void trimStringObjectIfNeeded(robj *o, int trim_small_values) {
 }
 
 /* Try to encode a string object in order to save space */
+/*
+ * 根据不同长度的字符串，选择不同的方式进行编码
+ * 整数编码：ptr存数字
+ * raw编码：ptr存sds的内存地址
+ * emb_str编码：redisObject和sds分配连续内存，更好的cache命中
+ */
 robj *tryObjectEncodingEx(robj *o, int try_trim) {
     long value;
     sds s = o->ptr;

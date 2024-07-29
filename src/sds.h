@@ -17,10 +17,14 @@ extern const char *SDS_NOINIT;
 #include <stdarg.h>
 #include <stdint.h>
 
+// sds 就是char*
 typedef char *sds;
 
 /* Note: sdshdr5 is never used, we just access the flags byte directly.
  * However is here to document the layout of type 5 SDS strings. */
+/*
+ * 不同的字符串长度申请不同的head，节省内存
+ */
 struct __attribute__ ((__packed__)) sdshdr5 {
     unsigned char flags; /* 3 lsb of type, and 5 msb of string length */
     char buf[];
@@ -49,18 +53,28 @@ struct __attribute__ ((__packed__)) sdshdr64 {
     unsigned char flags; /* 3 lsb of type, 5 unused bits */
     char buf[];
 };
-
-#define SDS_TYPE_5  0
+/*
+ * 不同的sds的头部对应的flag的枚举
+ */
+#define SDS_TYPE_5  0 // 已经不使用了，sds5会被转成sds8
 #define SDS_TYPE_8  1
 #define SDS_TYPE_16 2
 #define SDS_TYPE_32 3
 #define SDS_TYPE_64 4
 #define SDS_TYPE_MASK 7
 #define SDS_TYPE_BITS 3
+// 根据sds的指针运算出sds的头部的起始位置，会定义一个变量sh
 #define SDS_HDR_VAR(T,s) struct sdshdr##T *sh = (void*)((s)-(sizeof(struct sdshdr##T)));
+// 不定义新变量，直接运算出起始位置
 #define SDS_HDR(T,s) ((struct sdshdr##T *)((s)-(sizeof(struct sdshdr##T))))
+// sds5的特殊的长度获取方式，sds5的长度是在flags字段里面的高5位的，所以右移3位就是长度了
 #define SDS_TYPE_5_LEN(f) ((f)>>SDS_TYPE_BITS)
-
+/*
+ * 长度计算
+ * 根据sds的指针，-1的位置（向前偏移1字节）是flags
+ * 根据flags的类型运算出head的长度，再根据head得到长度字段
+ * sds5的长度字段特殊处理，见SDS_TYPE_5_LEN
+ */
 static inline size_t sdslen(const sds s) {
     unsigned char flags = s[-1];
     switch(flags&SDS_TYPE_MASK) {
@@ -78,6 +92,10 @@ static inline size_t sdslen(const sds s) {
     return 0;
 }
 
+/*
+ * 求sds的可用的空间=分配的-已用的
+ * sds5的固定返回0
+ */
 static inline size_t sdsavail(const sds s) {
     unsigned char flags = s[-1];
     switch(flags&SDS_TYPE_MASK) {
@@ -103,7 +121,9 @@ static inline size_t sdsavail(const sds s) {
     }
     return 0;
 }
-
+/*
+ * 设置sds新的长度
+ */
 static inline void sdssetlen(sds s, size_t newlen) {
     unsigned char flags = s[-1];
     switch(flags&SDS_TYPE_MASK) {
@@ -127,7 +147,9 @@ static inline void sdssetlen(sds s, size_t newlen) {
             break;
     }
 }
-
+/*
+ * 增加sds的长度
+ */
 static inline void sdsinclen(sds s, size_t inc) {
     unsigned char flags = s[-1];
     switch(flags&SDS_TYPE_MASK) {
@@ -154,6 +176,9 @@ static inline void sdsinclen(sds s, size_t inc) {
 }
 
 /* sdsalloc() = sdsavail() + sdslen() */
+/*
+ * 返回sds已分配的长度
+ */
 static inline size_t sdsalloc(const sds s) {
     unsigned char flags = s[-1];
     switch(flags&SDS_TYPE_MASK) {
@@ -170,7 +195,9 @@ static inline size_t sdsalloc(const sds s) {
     }
     return 0;
 }
-
+/*
+ * 设置sds的已分配长度
+ */
 static inline void sdssetalloc(sds s, size_t newlen) {
     unsigned char flags = s[-1];
     switch(flags&SDS_TYPE_MASK) {

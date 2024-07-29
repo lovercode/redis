@@ -181,6 +181,9 @@ static void _dictReset(dict *d, int htidx)
 }
 
 /* Create a new hash table */
+/*
+ * 创建dict，如果有用户数据的，需要分配并初始化为0
+ */
 dict *dictCreate(dictType *type)
 {
     size_t metasize = type->dictMetadataBytes ? type->dictMetadataBytes(NULL) : 0;
@@ -309,23 +312,31 @@ int dictShrink(dict *d, unsigned long size) {
 
 /* Helper function for `dictRehash` and `dictBucketRehash` which rehashes all the keys
  * in a bucket at index `idx` from the old to the new hash HT. */
+/*
+ * rehash 一个桶，包含扩容和缩容的处理
+ */
 static void rehashEntriesInBucketAtIndex(dict *d, uint64_t idx) {
-    dictEntry *de = d->ht_table[0][idx];
+    dictEntry *de = d->ht_table[0][idx]; // 老的桶
     uint64_t h;
     dictEntry *nextde;
     while (de) {
+        // 先保存下一个桶
         nextde = dictGetNext(de);
         void *key = dictGetKey(de);
         /* Get the index in the new hash table */
+        // 计算新的桶的index
         if (d->ht_size_exp[1] > d->ht_size_exp[0]) {
+            // 扩容，需要重新计算hash值
             h = dictHashKey(d, key, 1) & DICTHT_SIZE_MASK(d->ht_size_exp[1]);
         } else {
             /* We're shrinking the table. The tables sizes are powers of
              * two, so we simply mask the bucket index in the larger table
              * to get the bucket index in the smaller table. */
+            // 缩容，不需要重新计算hash值
             h = idx & DICTHT_SIZE_MASK(d->ht_size_exp[1]);
         }
         if (d->type->no_value) {
+            // set 集合，没有value
             if (d->type->keys_are_odd && !d->ht_table[1][h]) {
                 /* Destination bucket is empty and we can store the key
                  * directly without an allocated entry. Free the old entry
@@ -353,8 +364,10 @@ static void rehashEntriesInBucketAtIndex(dict *d, uint64_t idx) {
         d->ht_table[1][h] = de;
         d->ht_used[0]--;
         d->ht_used[1]++;
+        // 处理下一个桶
         de = nextde;
     }
+    // 老的清零
     d->ht_table[0][idx] = NULL;
 }
 
@@ -451,10 +464,10 @@ static void _dictRehashStep(dict *d) {
 
 /* Performs rehashing on a single bucket. */
 int _dictBucketRehash(dict *d, uint64_t idx) {
-    if (d->pauserehash != 0) return 0;
-    unsigned long s0 = DICTHT_SIZE(d->ht_size_exp[0]);
-    unsigned long s1 = DICTHT_SIZE(d->ht_size_exp[1]);
-    if (dict_can_resize == DICT_RESIZE_FORBID || !dictIsRehashing(d)) return 0;
+    if (d->pauserehash != 0) return 0; // 暂停rehash了
+    unsigned long s0 = DICTHT_SIZE(d->ht_size_exp[0]); // 老的桶
+    unsigned long s1 = DICTHT_SIZE(d->ht_size_exp[1]); // 新的桶
+    if (dict_can_resize == DICT_RESIZE_FORBID || !dictIsRehashing(d)) return 0; // 没有rehash
     /* If dict_can_resize is DICT_RESIZE_AVOID, we want to avoid rehashing. 
      * - If expanding, the threshold is dict_force_resize_ratio which is 4.
      * - If shrinking, the threshold is 1 / (HASHTABLE_MIN_FILL * dict_force_resize_ratio) which is 1/32. */
@@ -1572,18 +1585,21 @@ static signed char _dictNextExp(unsigned long size)
 void *dictFindPositionForInsert(dict *d, const void *key, dictEntry **existing) {
     unsigned long idx, table;
     dictEntry *he;
-    uint64_t hash = dictHashKey(d, key, d->useStoredKeyApi);
+    uint64_t hash = dictHashKey(d, key, d->useStoredKeyApi); // 计算hash值
     if (existing) *existing = NULL;
-    idx = hash & DICTHT_SIZE_MASK(d->ht_size_exp[0]);
+    idx = hash & DICTHT_SIZE_MASK(d->ht_size_exp[0]); // 定位到桶
 
     if (dictIsRehashing(d)) {
+        // dict在 rehash 中
         if ((long)idx >= d->rehashidx && d->ht_table[0][idx]) {
             /* If we have a valid hash entry at `idx` in ht0, we perform
              * rehash on the bucket at `idx` (being more CPU cache friendly) */
+            // 被访问的桶还没有被rehash，对当前桶进行rehash
             _dictBucketRehash(d, idx);
         } else {
             /* If the hash entry is not in ht0, we rehash the buckets based
              * on the rehashidx (not CPU cache friendly). */
+            // 被访问的桶在新的里面，
             _dictRehashStep(d);
         }
     }
@@ -1593,6 +1609,7 @@ void *dictFindPositionForInsert(dict *d, const void *key, dictEntry **existing) 
     keyCmpFunc cmpFunc = dictGetKeyCmpFunc(d);
 
     for (table = 0; table <= 1; table++) {
+        // ht_table[0] 并且 在rehash 并且 遍历的是rehash
         if (table == 0 && (long)idx < d->rehashidx) continue; 
         idx = hash & DICTHT_SIZE_MASK(d->ht_size_exp[table]);
         /* Search if this slot does not already contain the given key */
