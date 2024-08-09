@@ -30,7 +30,7 @@ typedef struct dictEntry dictEntry; /* opaque */
 typedef struct dict dict;
 /*
  * dict需要的接口，为了更好的扩展性，dict内置了一个dictType，主要是用来实现不同的dict的自己的接口
- * 比如当value是string或者其他，有不同的对比值的方式
+ * 比如当value是string或者其他，有不同的对比值的方式，c语言多态的一种实现方式
  */
 typedef struct dictType {
     /* Callbacks */
@@ -210,7 +210,7 @@ typedef enum {
 } dictResizeEnable;
 
 /* API */
-dict *dictCreate(dictType *type);
+dict *dictCreate(dictType *type); // 创建dict
 void dictTypeAddMeta(dict **d, dictType *typeWithMeta);
 int dictExpand(dict *d, unsigned long size);// 扩容
 int dictTryExpand(dict *d, unsigned long size);
@@ -248,7 +248,7 @@ double dictGetDoubleVal(const dictEntry *de);
 double *dictGetDoubleValPtr(dictEntry *de);
 size_t dictMemUsage(const dict *d);
 size_t dictEntryMemUsage(void);
-dictIterator *dictGetIterator(dict *d);
+dictIterator *dictGetIterator(dict *d);// 获取迭代器
 dictIterator *dictGetSafeIterator(dict *d);
 void dictInitIterator(dictIterator *iter, dict *d);
 void dictInitSafeIterator(dictIterator *iter, dict *d);

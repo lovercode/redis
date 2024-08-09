@@ -202,12 +202,15 @@ dict *dictCreate(dictType *type)
  * Rest of dictType's values must stay the same */
 void dictTypeAddMeta(dict **d, dictType *typeWithMeta) {
     /* Verify new dictType is compatible with the old one */
+    // 和老的进行对比，一致才能进行转换
     dictType toCmp = *typeWithMeta;
+    // 对比前需要把dictMetadataBytes置为空，因为老的里面没有
     toCmp.dictMetadataBytes = NULL;                            /* Expected old one not to have metadata */
     toCmp.onDictRelease = (*d)->type->onDictRelease;           /* Ignore 'onDictRelease' in comparison */
     assert(memcmp((*d)->type, &toCmp, sizeof(dictType)) == 0); /* The rest of the dictType fields must be the same */
 
     *d = zrealloc(*d, sizeof(dict) + typeWithMeta->dictMetadataBytes(*d));
+    // 赋值后，type就有dictMetadataBytes了
     (*d)->type = typeWithMeta;
 }
 
@@ -227,6 +230,10 @@ int _dictInit(dict *d, dictType *type)
 /* Resize or create the hash table,
  * when malloc_failed is non-NULL, it'll avoid panic if malloc fails (in which case it'll be set to 1).
  * Returns DICT_OK if resize was performed, and DICT_ERR if skipped. */
+/*
+ * 扩缩容都是这个函数
+ * 找当前大小的下一个2^N，作为新的大小
+ */
 int _dictResize(dict *d, unsigned long size, int* malloc_failed)
 {
     if (malloc_failed) *malloc_failed = 0;
@@ -399,6 +406,7 @@ static int dictCheckRehashingCompleted(dict *d) {
  * will visit at max N*10 empty buckets in total, otherwise the amount of
  * work it does would be unbound and the function may block for a long time. */
 int dictRehash(dict *d, int n) {
+    // 最大的空桶访问数量，n*10，最多rehash一个桶，那么最多访问10个空桶，防止cpu空转
     int empty_visits = n*10; /* Max number of empty buckets to visit. */
     unsigned long s0 = DICTHT_SIZE(d->ht_size_exp[0]);
     unsigned long s1 = DICTHT_SIZE(d->ht_size_exp[1]);
@@ -419,11 +427,11 @@ int dictRehash(dict *d, int n) {
         assert(DICTHT_SIZE(d->ht_size_exp[0]) > (unsigned long)d->rehashidx);
         while(d->ht_table[0][d->rehashidx] == NULL) {
             d->rehashidx++;
-            if (--empty_visits == 0) return 1;
+            if (--empty_visits == 0) return 1; // 空桶访问超过限制，取消本次rehash
         }
         /* Move all the keys in this bucket from the old to the new hash HT */
         rehashEntriesInBucketAtIndex(d, d->rehashidx);
-        d->rehashidx++;
+        d->rehashidx++; // 记录rehash的桶进度
     }
 
     return !dictCheckRehashingCompleted(d);
@@ -462,6 +470,7 @@ int dictRehashMicroseconds(dict *d, uint64_t us) {
  * dictionary so that the hash table automatically migrates from H1 to H2
  * while it is actively used. */
 static void _dictRehashStep(dict *d) {
+    // 没有被暂停rehash，rehash一个桶
     if (d->pauserehash == 0) dictRehash(d,1);
 }
 
@@ -513,6 +522,10 @@ int dictAdd(dict *d, void *key, void *val)
  *
  * If key was added, the hash entry is returned to be manipulated by the caller.
  */
+/*
+ * 返回NULL，表示已经存在key了，可以直接修改existing的value
+ * 返回不为NULL，表示不存在key，会新增节点，调用方拿到dictEntry后可以设置value
+ */
 dictEntry *dictAddRaw(dict *d, void *key, dictEntry **existing)
 {
     /* Get the position for the new key or NULL if the key already exists. */
@@ -520,6 +533,7 @@ dictEntry *dictAddRaw(dict *d, void *key, dictEntry **existing)
     if (!position) return NULL;
 
     /* Dup the key if necessary. */
+    // 需要的话复制key
     if (d->type->keyDup) key = d->type->keyDup(d, key);
 
     return dictInsertAtPosition(d, key, position);
@@ -583,6 +597,7 @@ int dictReplace(dict *d, void *key, void *val)
      * does not exists dictAdd will succeed. */
     entry = dictAddRaw(d,key,&existing);
     if (entry) {
+        // 不存在，entry是待写的节点，直接把value挂在上面就行
         dictSetVal(d, entry, val);
         return 1;
     }
@@ -592,9 +607,11 @@ int dictReplace(dict *d, void *key, void *val)
      * as the previous one. In this context, think to reference counting,
      * you want to increment (set), and then decrement (free), and not the
      * reverse. */
+    // 已经存在key了，设置新的value，销毁老的value
     void *oldval = dictGetVal(existing);
     dictSetVal(d, existing, val);
     if (d->type->valDestructor)
+        // 销毁value
         d->type->valDestructor(d, oldval);
     return 0;
 }
@@ -606,6 +623,9 @@ int dictReplace(dict *d, void *key, void *val)
  * existing key is returned.)
  *
  * See dictAddRaw() for more information. */
+/*
+ * 查找或者添加key
+ */
 dictEntry *dictAddOrFind(dict *d, void *key) {
     dictEntry *entry, *existing;
     entry = dictAddRaw(d,key,&existing);
@@ -615,6 +635,9 @@ dictEntry *dictAddOrFind(dict *d, void *key) {
 /* Search and remove an element. This is a helper function for
  * dictDelete() and dictUnlink(), please check the top comment
  * of those functions. */
+/*
+ * 删除key，可指定是否需要free
+ */
 static dictEntry *dictGenericDelete(dict *d, const void *key, int nofree) {
     uint64_t h, idx;
     dictEntry *he, *prevHe;
@@ -627,6 +650,7 @@ static dictEntry *dictGenericDelete(dict *d, const void *key, int nofree) {
     idx = h & DICTHT_SIZE_MASK(d->ht_size_exp[0]);
 
     if (dictIsRehashing(d)) {
+        // 删除也会触发 rehash
         if ((long)idx >= d->rehashidx && d->ht_table[0][idx]) {
             /* If we have a valid hash entry at `idx` in ht0, we perform
              * rehash on the bucket at `idx` (being more CPU cache friendly) */
@@ -649,6 +673,7 @@ static dictEntry *dictGenericDelete(dict *d, const void *key, int nofree) {
             void *he_key = dictGetKey(he);
             if (key == he_key || cmpFunc(d, key, he_key)) {
                 /* Unlink the element from the list */
+                // 从链表中删除
                 if (prevHe)
                     dictSetNext(prevHe, dictGetNext(he));
                 else
@@ -657,12 +682,13 @@ static dictEntry *dictGenericDelete(dict *d, const void *key, int nofree) {
                     dictFreeUnlinkedEntry(d, he);
                 }
                 d->ht_used[table]--;
-                _dictShrinkIfNeeded(d);
+                _dictShrinkIfNeeded(d);// 删除后判断是否需要缩容
                 return he;
             }
             prevHe = he;
             he = dictGetNext(he);
         }
+        // 没有rehash，只扫描ht_table[0]
         if (!dictIsRehashing(d)) break;
     }
     return NULL; /* not found */
@@ -1499,6 +1525,7 @@ unsigned long dictScanDefrag(dict *d,
  * type has resizeAllowed member function. */
 static int dictTypeResizeAllowed(dict *d, size_t size) {
     if (d->type->resizeAllowed == NULL) return 1;
+    // 使用方决定是否需要扩容
     return d->type->resizeAllowed(
                     DICTHT_SIZE(_dictNextExp(size)) * sizeof(dictEntry*),
                     (double)d->ht_used[0] / DICTHT_SIZE(d->ht_size_exp[0]));
@@ -1521,6 +1548,10 @@ int dictExpandIfNeeded(dict *d) {
      * table (global setting) or we should avoid it but the ratio between
      * elements/buckets is over the "safe" threshold, we resize doubling
      * the number of buckets. */
+    /*
+     * 允许resize，如果节点数量大于等于桶数量，那么就扩容
+     * 没有禁止resize，如果节点数量大于4倍的桶数量，也扩容
+     */
     if ((dict_can_resize == DICT_RESIZE_ENABLE &&
          d->ht_used[0] >= DICTHT_SIZE(d->ht_size_exp[0])) ||
         (dict_can_resize != DICT_RESIZE_FORBID &&
@@ -1546,6 +1577,7 @@ static void _dictExpandIfNeeded(dict *d) {
  * that shrinking has not been triggered (may be try expanding?)*/
 int dictShrinkIfNeeded(dict *d) {
     /* Incremental rehashing already in progress. Return. */
+    // rehash中不能缩容
     if (dictIsRehashing(d)) return DICT_OK;
     
     /* If the size of hash table is DICT_HT_INITIAL_SIZE, don't shrink it. */
@@ -1554,6 +1586,9 @@ int dictShrinkIfNeeded(dict *d) {
     /* If we reached below 1:8 elements/buckets ratio, and we are allowed to resize
      * the hash table (global setting) or we should avoid it but the ratio is below 1:32,
      * we'll trigger a resize of the hash table. */
+    /*
+     * 节点*8 <= 桶 缩容
+     */
     if ((dict_can_resize == DICT_RESIZE_ENABLE &&
          d->ht_used[0] * HASHTABLE_MIN_FILL <= DICTHT_SIZE(d->ht_size_exp[0])) ||
         (dict_can_resize != DICT_RESIZE_FORBID &&
@@ -1575,6 +1610,7 @@ static void _dictShrinkIfNeeded(dict *d)
 }
 
 /* Our hash table capability is a power of two */
+// 计算下一个大小
 static signed char _dictNextExp(unsigned long size)
 {
     if (size <= DICT_HT_INITIAL_SIZE) return DICT_HT_INITIAL_EXP;
@@ -1599,12 +1635,12 @@ void *dictFindPositionForInsert(dict *d, const void *key, dictEntry **existing) 
         if ((long)idx >= d->rehashidx && d->ht_table[0][idx]) {
             /* If we have a valid hash entry at `idx` in ht0, we perform
              * rehash on the bucket at `idx` (being more CPU cache friendly) */
-            // 被访问的桶还没有被rehash，对当前桶进行rehash
+            // 被访问的桶还没有被rehash，对当前桶进行rehash，完成后被访问的桶前面可能还有没有被rehash的
             _dictBucketRehash(d, idx);
         } else {
             /* If the hash entry is not in ht0, we rehash the buckets based
              * on the rehashidx (not CPU cache friendly). */
-            // 被访问的桶在新的里面，
+            // 被访问的桶已经被rehash过了，从上次rehash的地方在rehash一个桶
             _dictRehashStep(d);
         }
     }
